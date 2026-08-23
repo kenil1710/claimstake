@@ -117,12 +117,18 @@ export async function retry(fn, { attempts = 5, baseMs = 1500, label = "rpc" } =
   throw last;
 }
 
+/** Every role in .accounts.json, keyed by name. */
+export function accounts() {
+  return JSON.parse(readFileSync(new URL("./.accounts.json", import.meta.url), "utf8"));
+}
+
 /** Builds the read/wallet client pair plus a settle-aware `send`. */
-export function connect({ networkName = argOf("network", "studionet"), address } = {}) {
+export function connect({ networkName = argOf("network", "studionet"), address, role = "client" } = {}) {
   const chain = CHAINS[networkName];
   if (!chain) throw new Error(`unknown network ${networkName}`);
-  const acc = JSON.parse(readFileSync(new URL("./.accounts.json", import.meta.url), "utf8"));
-  const account = createAccount(acc.client.key);
+  const acc = accounts();
+  if (!acc[role]?.key) throw new Error(`no key for role ${role} — run: node accounts.mjs`);
+  const account = createAccount(acc[role].key);
   const wallet = createClient({ chain, account });
   const read = createClient({ chain });
   const deadline = chain.isStudio ? 240_000 : 1_200_000;
