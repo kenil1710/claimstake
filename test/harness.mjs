@@ -42,10 +42,17 @@ export function outcomeOf(tx) {
   const exec = receipt?.execution_result ?? null;
   const named = tx?.txExecutionResultName ?? null;
 
+  // Bradbury carries NO `consensus_data` whatsoever, so `receipt` is null there
+  // and every field derived from it reads as absent rather than as failure. The
+  // top-level `txExecutionResultName` is the only success signal that exists on
+  // that network: FINISHED_WITH_RETURN vs FINISHED_WITH_ERROR.
+  const returnedOk = named === "FINISHED_WITH_RETURN";
   const settled = Boolean(status && TERMINAL_STATES.includes(status));
   // Explicit ERROR on either surface is a failure. Absence of a receipt is NOT
-  // treated as success.
-  const reverted = exec === "ERROR" || named === "FINISHED_WITH_ERROR";
+  // treated as success. `result.status === "rollback"` is the third spelling —
+  // it is what a gl.vm.UserError actually produces.
+  const rolledBack = receipt?.result?.status === "rollback";
+  const reverted = exec === "ERROR" || named === "FINISHED_WITH_ERROR" || rolledBack;
   const accepted = status === "ACCEPTED" || status === "FINALIZED";
 
   return {
@@ -55,13 +62,88 @@ export function outcomeOf(tx) {
     named,
     // A receipt that carries an explicit result must say SUCCESS; one that
     // carries none (Bradbury deploys) falls back to the transaction status.
-    ok: settled && accepted && !reverted && (exec === null || exec === "SUCCESS"),
+    ok: settled && accepted && !reverted && (exec === "SUCCESS" || returnedOk || exec === null),
+    /**
+     * Whether the return VALUE could be read at all.
+     *
+     * False on Bradbury: the value lives inside `consensus_data`, which that
+     * network does not populate. Callers must not treat an unreadable return as
+     * a rejection — that is a property of the transport, not of the contract —
+     * and should fall back to observing contract state instead. See how
+     * suite.mjs decides acceptance.
+     */
+    returnReadable: receipt !== null && receipt !== undefined,
     reverted,
     stderr: String(receipt?.genvm_result?.stderr ?? receipt?.stderr ?? ""),
     stdout: String(receipt?.genvm_result?.stdout ?? receipt?.stdout ?? ""),
+    // The UserError text. NOT in stderr — stderr and stdout both come back
+    // empty for a revert, so a suite that asserts on them can only ever check
+    // THAT a call reverted, never that it reverted for the right reason, and
+    // every wrong-reason revert passes silently. The message is the `payload`
+    // of the rollback result; `raw` is the same string base64-encoded, read as
+    // a fallback in case the decoded field is ever absent.
+    revertReason: revertReasonOf(receipt),
+    returned: returnValueOf(receipt),
     pending: (receipt?.pending_transactions ?? []).length,
     raw: receipt ?? null,
   };
+}
+
+/**
+ * What a successful call returned, decoded.
+ *
+ * The receipt spells the two outcomes differently: on a revert `result.payload`
+ * is the reason as a bare string, on a success it is an object carrying the
+ * value both as raw calldata bytes and as `readable` — a JSON-encoded form of
+ * the return value. Reading `payload` without checking which shape it is gets
+ * you "[object Object]".
+ *
+ * This matters more than it looks. ClaimStake's payable methods no longer
+ * revert when they reject input (a revert keeps the caller's stake), so a
+ * rejection now arrives as a SUCCESSFUL transaction whose return value says
+ * `ok: false`. A test that only looks at tx status cannot tell an accepted
+ * dispute from a refunded one.
+ */
+export function returnValueOf(receipt) {
+  const payload = receipt?.result?.payload;
+  if (payload === null || payload === undefined) return null;
+  if (typeof payload === "string") return payload;
+  if (typeof payload.readable === "string") {
+    try {
+      return JSON.parse(payload.readable);
+    } catch {
+      return payload.readable;
+    }
+  }
+  return null;
+}
+
+/** A returned JSON string parsed into an object, or null if it was not one. */
+export function returnedJson(out) {
+  const value = typeof out === "string" ? out : out?.returned;
+  if (typeof value !== "string") return null;
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The revert message a `gl.vm.UserError` produced, or "" if the call did not revert. */
+export function revertReasonOf(receipt) {
+  const result = receipt?.result;
+  if (!result) return "";
+  if (typeof result.payload === "string" && result.payload) return result.payload;
+  if (typeof result.raw === "string" && result.raw) {
+    try {
+      // The leading byte is a status tag, not text; strip anything unprintable.
+      return Buffer.from(result.raw, "base64").toString("utf8").replace(/^[\x00-\x1f]+/, "");
+    } catch {
+      return "";
+    }
+  }
+  return "";
 }
 
 /** The last frame of a GenVM traceback — the line that actually failed. */
@@ -98,17 +180,22 @@ export async function fundOnStudio(chain, address, wei) {
  * contract fault, and without a retry it aborts a run mid-assertion and reads
  * like a failure of whatever call happened to be in flight.
  */
-export async function retry(fn, { attempts = 5, baseMs = 1500, label = "rpc" } = {}) {
+export async function retry(fn, { attempts = 6, baseMs = 4000, label = "rpc" } = {}) {
   let last;
   for (let i = 1; i <= attempts; i++) {
     try {
       return await fn();
     } catch (e) {
       last = e;
+      const message = String(e?.message ?? e);
       const transient =
-        /Unexpected token '<'|not valid JSON|fetch failed|ECONNRESET|ETIMEDOUT|502|503|504/i.test(
-          String(e?.message ?? e),
-        );
+        /Unexpected token '<'|not valid JSON|fetch failed|ECONNRESET|ETIMEDOUT|502|503|504/i.test(message) ||
+        // Bradbury holds ONE transaction slot per recipient contract. A write
+        // that arrives while the previous one is still settling is rejected at
+        // the consensus contract, which surfaces as an EVM revert rather than
+        // as congestion. Backing off and resubmitting is the correct response;
+        // treating it as a contract fault is not.
+        /to consensus contract .* was reverted/i.test(message);
       if (!transient || i === attempts) throw e;
       console.log(`  … ${label} attempt ${i} hit transient RPC noise, retrying`);
       await sleep(baseMs * i);
