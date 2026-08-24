@@ -1,0 +1,318 @@
+@import "tailwindcss";
+
+/*
+ * ClaimStake — "the seam".
+ *
+ * The product is two people putting EQUAL money behind opposite readings of one
+ * claim. So the interface is built on a single device: a divided field with the
+ * challenger (FALSE) on one side, the defender (TRUE) on the other, and a seam
+ * between them. While a dispute is live the seam sits dead centre, because the
+ * stakes are forced to match exactly. When a verdict lands the seam SHIFTS —
+ * the winner's side floods, the loser's collapses to a sliver — so an outcome
+ * is readable from the geometry alone, down a whole list, before reading a word.
+ *
+ * Two accent hues rather than one, and that is not decoration: madder is the
+ * challenger, viridian is the defender, and every surface that shows a side
+ * uses the same two. INCONCLUSIVE gets neither, and its seam stays centred —
+ * perfect balance is literally what "nobody won" means here.
+ */
+
+:root {
+  /* Ground: a cool paper grey with a green cast. Not cream. */
+  --field: #e9eae4;
+  --field-raised: #f3f4ef;
+  --field-sunk: #dcded6;
+
+  /* Ink: near-black with a blue cast, so it sits cold against the paper. */
+  --ink: #191c22;
+  --ink-soft: #4a4f59;
+  --ink-faint: #7d828b;
+  --rule: #c6c9c0;
+  --rule-strong: #a9ada2;
+
+  /* The two sides. Never used decoratively — they always mean a party. */
+  --challenger: #a5334a;
+  --challenger-wash: #f0dade;
+  --defender: #1f6f5c;
+  --defender-wash: #d5e5df;
+
+  /* Neither side: inconclusive, expired, canceled. */
+  --neutral: #83806f;
+  --neutral-wash: #e0e0d6;
+
+  /* Money. Used sparingly enough that it still reads as an accent. */
+  --gold: #96702a;
+
+  --focus: #1f4fa5;
+
+  --font-display: var(--font-bodoni), "Didot", "Bodoni MT", serif;
+  --font-body: var(--font-public), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+}
+
+/* No dark palette, deliberately. This is a records interface and the paper
+   ground is load-bearing for the seam's contrast — the two side washes are
+   tuned against it. A half-done inversion would break the one device the whole
+   design rests on, so the page commits to a single look and paints its own
+   background explicitly rather than borrowing the browser's. */
+
+* {
+  border-color: var(--rule);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background: var(--field);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.55;
+  font-feature-settings: "kern", "liga";
+  -webkit-font-smoothing: antialiased;
+}
+
+/* A faint horizontal ruling, like a ledger sheet. Sits under everything and is
+   the only ambient texture in the design. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    to bottom,
+    transparent 0,
+    transparent 31px,
+    color-mix(in srgb, var(--rule) 34%, transparent) 31px,
+    color-mix(in srgb, var(--rule) 34%, transparent) 32px
+  );
+  opacity: 0.5;
+}
+
+/* ── Type ──────────────────────────────────────────────────────────────── */
+
+.display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  line-height: 1.04;
+}
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Money is always mono and always tabular, so columns of stakes line up and a
+   change in magnitude is visible as a change in width. */
+.amount {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* ── The seam ──────────────────────────────────────────────────────────── */
+
+.seam {
+  --split: 50%;
+  display: grid;
+  grid-template-columns: var(--split) 1fr;
+  position: relative;
+  isolation: isolate;
+  transition: grid-template-columns 620ms cubic-bezier(0.16, 0.84, 0.24, 1);
+}
+
+.seam-side {
+  padding: 0.75rem 0.9rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.seam-challenger {
+  background: var(--challenger-wash);
+  color: var(--challenger);
+  border-right: 1.5px solid var(--ink);
+}
+
+.seam-defender {
+  background: var(--defender-wash);
+  color: var(--defender);
+}
+
+/* Neither side won: drain both to neutral and hold the seam at centre. */
+.seam-void .seam-challenger,
+.seam-void .seam-defender {
+  background: var(--neutral-wash);
+  color: var(--neutral);
+}
+
+/* A dispute that never reached a verdict at all. */
+.seam-dead .seam-challenger {
+  border-right-style: dashed;
+  border-right-color: var(--rule-strong);
+}
+
+.seam-dead .seam-challenger,
+.seam-dead .seam-defender {
+  background: var(--field-sunk);
+  color: var(--ink-faint);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seam {
+    transition: none;
+  }
+}
+
+/* ── Surfaces ──────────────────────────────────────────────────────────── */
+
+.sheet {
+  background: var(--field-raised);
+  border: 1.5px solid var(--ink);
+  position: relative;
+  z-index: 1;
+}
+
+.hairline {
+  border: 1px solid var(--rule);
+}
+
+/* ── Controls ──────────────────────────────────────────────────────────── */
+
+.btn {
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.875rem;
+  letter-spacing: 0.005em;
+  padding: 0.6rem 1.15rem;
+  border: 1.5px solid var(--ink);
+  background: var(--ink);
+  color: var(--field-raised);
+  cursor: pointer;
+  transition: transform 120ms ease, background 140ms ease, color 140ms ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--ink);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--field-raised);
+}
+
+.btn-challenger {
+  background: var(--challenger);
+  border-color: var(--challenger);
+  color: #fff;
+}
+
+.btn-defender {
+  background: var(--defender);
+  border-color: var(--defender);
+  color: #fff;
+}
+
+.field {
+  width: 100%;
+  font-family: var(--font-body);
+  font-size: 0.95rem;
+  padding: 0.65rem 0.8rem;
+  background: var(--field-raised);
+  border: 1.5px solid var(--rule-strong);
+  color: var(--ink);
+}
+
+.field:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.field::placeholder {
+  color: var(--ink-faint);
+}
+
+textarea.field {
+  resize: vertical;
+  min-height: 5.5rem;
+  line-height: 1.5;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* ── Status chips ──────────────────────────────────────────────────────── */
+
+.chip {
+  font-family: var(--font-mono);
+  font-size: 0.625rem;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid currentColor;
+  display: inline-block;
+  white-space: nowrap;
+}
+
+.link-underline {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+  text-decoration-color: var(--rule-strong);
+}
+
+.link-underline:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Page-load settle for the hero seam only — one orchestrated moment, not
+   scattered effects. */
+@keyframes seam-settle {
+  from {
+    grid-template-columns: 92% 1fr;
+  }
+  to {
+    grid-template-columns: var(--split) 1fr;
+  }
+}
+
+.seam-settle {
+  animation: seam-settle 900ms cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .seam-settle {
+    animation: none;
+  }
+}
