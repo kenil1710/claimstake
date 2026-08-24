@@ -218,25 +218,95 @@ export function connect({ networkName = argOf("network", "studionet"), address, 
   const account = createAccount(acc[role].key);
   const wallet = createClient({ chain, account });
   const read = createClient({ chain });
-  const deadline = chain.isStudio ? 240_000 : 1_200_000;
+  // 20 minutes was long enough that a single unreadable transaction cost more
+  // wall clock than the entire rest of the suite. Nudging covers the first 450s
+  // (10 x 45s) and the slowest real Bradbury settle observed is a 223s deploy,
+  // so 10 minutes is still several times the worst honest case.
+  const deadline = chain.isStudio ? 240_000 : 600_000;
   const pollMs = chain.isStudio ? 1_000 : 5_000;
 
+  /**
+   * Submit a write and wait for it to reach a terminal state.
+   *
+   * NEVER THROWS. Every caller already branches on `out.ok`, so a give-up is
+   * returned as an unsettled outcome and costs one red check. Letting it escape
+   * as an exception instead took down a whole Bradbury run at TEST 5 with seven
+   * tests still unreported — one dropped transaction should not be able to do
+   * that to six tests it never touched.
+   */
   async function send(functionName, args = [], value = 0n) {
-    const hash = await retry(
-      () => wallet.writeContract({ address, functionName, args, value }),
-      { label: functionName },
-    );
     const started = Date.now();
+    const giveUp = (reason, hash = null) => ({
+      ...outcomeOf(null),
+      status: "UNSETTLED",
+      hash,
+      tx: null,
+      seconds: (Date.now() - started) / 1000,
+      failure: reason,
+      revertReason: reason,
+    });
+
+    let hash;
+    try {
+      hash = await retry(
+        () => wallet.writeContract({ address, functionName, args, value }),
+        { label: functionName },
+      );
+    } catch (e) {
+      return giveUp(`submit failed — ${String(e?.message ?? e)}`);
+    }
+
     let nudges = 0;
+    let blindSince = null;
     for (;;) {
-      const tx = await read.getTransaction({ hash }).catch(() => null);
-      const out = outcomeOf(tx);
-      if (out.settled) return { ...out, hash, tx, seconds: (Date.now() - started) / 1000 };
+      /*
+       * A failing RPC and a genuinely absent transaction both used to arrive
+       * here as `null`, via `.catch(() => null)`. That made a burst of `fetch
+       * failed` indistinguishable from the endpoint answering "no such
+       * transaction", so the loop went blind and then sat out its entire
+       * deadline in silence — 28 swallowed errors, 20 minutes, no output.
+       *
+       * `retry` now gives the endpoint several chances with backoff, and a poll
+       * it still cannot answer is recorded as BLIND rather than read as an
+       * outcome. Only a poll the RPC actually answered may settle the call:
+       * absence of evidence is not evidence of absence.
+       */
+      let answered = true;
+      let tx = null;
+      try {
+        tx = await retry(() => read.getTransaction({ hash }), {
+          attempts: 4,
+          baseMs: 2_000,
+          label: `${functionName} poll`,
+        });
+      } catch {
+        answered = false;
+      }
+
+      if (answered) {
+        blindSince = null;
+        const out = outcomeOf(tx);
+        if (out.settled) return { ...out, hash, tx, seconds: (Date.now() - started) / 1000 };
+      } else if (blindSince === null) {
+        blindSince = Date.now();
+      }
+
       if (!chain.isStudio && Date.now() - started > (nudges + 1) * 45_000 && nudges < 10) {
         nudges++;
         await wallet.finalizeIdlenessTxs({ txIds: [hash] }).catch(() => {});
       }
-      if (Date.now() - started > deadline) throw new Error(`${functionName} never settled`);
+      if (Date.now() - started > deadline) {
+        const secs = (deadline / 1000).toFixed(0);
+        // Say WHICH of the two it was. "never settled" alone cannot distinguish
+        // a stuck transaction from an endpoint that stopped answering, and the
+        // two call for opposite responses.
+        return giveUp(
+          blindSince
+            ? `never settled in ${secs}s — RPC unreadable for the last ${((Date.now() - blindSince) / 1000).toFixed(0)}s, tx may still be in flight`
+            : `never settled in ${secs}s — tx stayed non-terminal`,
+          hash,
+        );
+      }
       await sleep(pollMs);
     }
   }

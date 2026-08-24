@@ -223,10 +223,31 @@ if (!address) {
 }
 console.log(`\ncontract address: ${address}`);
 
-// A deploy can report ACCEPTED and still have left no contract behind; every
-// later call then fails with `invalid_contract`, which reads exactly like a
-// network fault. This read is what distinguishes the two.
-const sanity = await read.readContract({ address, functionName: sanityMethod, args: [] });
+/*
+ * A deploy can report ACCEPTED and still have left no contract behind; every
+ * later call then fails with `invalid_contract`, which reads exactly like a
+ * network fault. This read is what distinguishes the two.
+ *
+ * It has to tolerate indexing lag to do that, though. Acceptance and
+ * queryability are not the same instant on Bradbury -- a contract that settled
+ * in 15s answered `contract not found` on the very next call and was live 20s
+ * later. Firing once turned a perfectly good deploy into a hard failure that
+ * exited before writing .deployed.json, losing the address of a contract that
+ * existed. Give it a bounded window; only a contract that never becomes
+ * readable is actually missing.
+ */
+let sanity;
+for (let attempt = 1; ; attempt++) {
+  try {
+    sanity = await read.readContract({ address, functionName: sanityMethod, args: [] });
+    break;
+  } catch (e) {
+    const missing = /not found|invalid_contract/i.test(String(e?.message ?? e));
+    if (!missing || attempt >= 12) throw e;
+    if (attempt === 1) console.log(`  not queryable yet — waiting for the deploy to index`);
+    await sleep(5000);
+  }
+}
 console.log(`${sanityMethod}() -> ${String(sanity).slice(0, 200)}`);
 
 writeFileSync(
