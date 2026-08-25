@@ -110,6 +110,33 @@ function defenderFor(exclude = [], used = []) {
 }
 
 /**
+ * Poll a contract read until `ready` holds, then return that value.
+ *
+ * Bradbury applies state on FINALIZATION, which lands AFTER a transaction
+ * reaches ACCEPTED — so a read taken the instant `send` returns can still show
+ * pre-transaction state. A single read here reported a defend that had already
+ * succeeded on chain as "the seat was not taken", failed the test, and skipped
+ * the resolve that depended on it. Balances were already polled for exactly this
+ * reason (`atLeast`, `settled`); contract state needs the same treatment.
+ *
+ * Returns the last value read on timeout, so callers still assert on real data
+ * rather than on null.
+ */
+async function untilState(readFn, ready, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  for (;;) {
+    const v = await readFn().catch(() => null);
+    if (v !== null) {
+      last = v;
+      if (ready(v)) return v;
+    }
+    if (Date.now() > deadline) return last;
+    await sleep(3000);
+  }
+}
+
+/**
  * Was a payable call accepted, decided from CONTRACT STATE rather than the
  * return value.
  *
@@ -124,7 +151,20 @@ function defenderFor(exclude = [], used = []) {
  * refund counter moved. Exactly one of those is true for every payable call.
  */
 async function acceptanceOf(before, out) {
-  const after = await viewJson("get_stats");
+  // Either outcome is terminal: the dispute count moves (accepted) or the
+  // refund total moves (rejected). Polling for "whichever comes first" keeps a
+  // genuine rejection fast instead of waiting out the whole timeout.
+  const after = await untilState(
+    () => viewJson("get_stats"),
+    (s) =>
+      Number(s.total) > Number(before.total) ||
+      BigInt(s.total_refunded) > BigInt(before.total_refunded),
+  );
+  if (!after) {
+    // Every poll failed. Report it as not-accepted rather than throwing, so one
+    // unreadable window costs a single red check instead of the whole run.
+    return { accepted: false, id: -1, refunded: 0n, reason: "(stats unreadable)", stats: before };
+  }
   const created = Number(after.total) > Number(before.total);
   const refunded = BigInt(after.total_refunded) - BigInt(before.total_refunded);
   // Prefer the on-chain reason when the transport carried one (Studionet); it
@@ -171,8 +211,19 @@ async function create(label, claim, url, evidence, minutes) {
 
 /** Did this wallet actually take the seat? Read it off the dispute, not the receipt. */
 async function tookSeat(id, who) {
-  const d = await viewJson("get_dispute", [id]);
-  return d.found && d.status === "ACTIVE" && d.defender.toLowerCase() === as[who].account.address.toLowerCase();
+  // Terminal as soon as the seat is no longer empty — whether this wallet took
+  // it or a competitor did. That keeps TEST 7's losing submission fast, since
+  // the winner seating itself ends the poll immediately.
+  const d = await untilState(
+    () => viewJson("get_dispute", [id]),
+    (x) => x.found && x.status !== "OPEN",
+  );
+  if (!d) return false;
+  return (
+    d.found &&
+    d.status === "ACTIVE" &&
+    String(d.defender).toLowerCase() === as[who].account.address.toLowerCase()
+  );
 }
 
 async function defend(who, id, label, evidence = "") {
@@ -200,7 +251,14 @@ async function resolve(who, id, expected) {
     check(`resolve #${id}`, false, `${out.status}/${out.exec} ${out.revertReason}`);
     return null;
   }
-  const d = await viewJson("get_dispute", [id]);
+  const d = await untilState(
+    () => viewJson("get_dispute", [id]),
+    (x) => x.found && x.status === "RESOLVED",
+  );
+  if (!d) {
+    check(`resolve #${id}`, false, "dispute unreadable after resolve");
+    return null;
+  }
   const hit = d.verdict === expected;
   check(`verdict is ${expected}`, hit, hit ? `${secs}s, confidence ${d.confidence}/100` : `got ${d.verdict} (confidence ${d.confidence})`);
   note(`pot ${gen(d.pot)} · fee ${gen(d.fee)} · payout ${gen(d.payout)}`);
