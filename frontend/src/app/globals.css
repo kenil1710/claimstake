@@ -93,6 +93,20 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   font-feature-settings: "kern", "liga";
+
+  /*
+   * The side reveals enter from off their own edge — the defender's cards start
+   * 34px to the right of where they land. Until a card scrolls into view it is
+   * still sitting at that offset, which is real page width: on a narrow screen
+   * the document scrolls sideways to reach an element that is mid-animation.
+   *
+   * `clip` rather than `hidden` on purpose. `overflow-x: hidden` on the body
+   * promotes it to the scroll container, which silently breaks every
+   * `position: sticky` descendant — the app header and the docs contents rail
+   * both stop sticking. `clip` trims the overflow without creating a scroll
+   * container, so the seam stays and the sticky elements keep working.
+   */
+  overflow-x: clip;
 }
 
 /* Ambient grid. The only texture in the design — a faint plotting field that
@@ -517,5 +531,98 @@ select.field {
 @media (max-width: 820px) {
   .hide-sm {
     display: none;
+  }
+}
+
+/* ── Docs ──────────────────────────────────────────────────────────────── */
+
+/*
+ * Reference layout: a contents rail that tracks the reader, and the prose.
+ *
+ * The rail is `position: sticky` rather than fixed so it stops at the end of
+ * the article instead of hanging over the footer, and it disappears entirely
+ * below the breakpoint — a sidebar that scrolls with you on a phone is just a
+ * second screen of links to get past before reaching the thing you came for.
+ */
+.docs-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 3rem;
+}
+
+.docs-toc {
+  display: none;
+}
+
+@media (min-width: 940px) {
+  .docs-grid {
+    grid-template-columns: 208px minmax(0, 1fr);
+    gap: 4rem;
+  }
+
+  .docs-toc {
+    display: block;
+    position: sticky;
+    top: 5.5rem;
+    align-self: start;
+    max-height: calc(100dvh - 7rem);
+    overflow-y: auto;
+  }
+}
+
+/* ── Disclosure ────────────────────────────────────────────────────────── */
+
+.faq {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq__q {
+  font-size: 1.02rem;
+  cursor: pointer;
+  padding: 1.05rem 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  list-style: none;
+  transition: color 150ms ease;
+}
+
+/* Safari draws its own triangle from a pseudo-element that `list-style` does
+   not reach; both spellings are needed to actually clear the marker. */
+.faq__q::-webkit-details-marker {
+  display: none;
+}
+
+.faq__q::marker {
+  content: "";
+}
+
+.faq__q:hover {
+  color: var(--text);
+}
+
+/* The marker is a plus that becomes a minus — rotating one half of a cross is
+   cheaper than swapping glyphs and never reflows the row. */
+.faq__q::after {
+  content: "";
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  position: relative;
+  background:
+    linear-gradient(var(--text-faint), var(--text-faint)) center/100% 1px no-repeat,
+    linear-gradient(var(--text-faint), var(--text-faint)) center/1px 100% no-repeat;
+  transition: transform 220ms cubic-bezier(0.16, 0.84, 0.24, 1), background 180ms ease;
+}
+
+.faq[open] .faq__q::after {
+  transform: rotate(90deg);
+  background: linear-gradient(var(--text), var(--text)) center/100% 1px no-repeat;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .faq__q::after {
+    transition: none;
   }
 }

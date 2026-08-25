@@ -169,9 +169,9 @@ export default function DisputePage({ params }: { params: Promise<{ id: string }
                   Nobody took the other side
                 </h2>
                 <p style={{ color: "var(--text-dim)", fontSize: "0.93rem", marginBottom: "1.1rem", maxWidth: "62ch" }}>
-                  The window closed {formatRelative(data.join_deadline, now || undefined)} with no defender.
-                  Closing this out returns the challenger&rsquo;s full stake — anyone can do it, and no
-                  fee is taken.
+                  The window closed {formatRelative(data.join_deadline, now || undefined)}{" "}
+                  with no defender. Closing this out returns the challenger&rsquo;s full stake —
+                  anyone can do it, and no fee is taken.
                 </p>
                 <button
                   className="btn"

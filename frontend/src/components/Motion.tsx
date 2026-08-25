@@ -148,25 +148,30 @@ export function CountUp({
   const reduce = useReducedMotion();
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "-60px" });
-  const [shown, setShown] = useState(reduce ? value : 0);
+  const [counted, setCounted] = useState(0);
 
   useEffect(() => {
-    if (reduce) {
-      setShown(value);
-      return;
-    }
-    if (!inView) return;
+    if (reduce || !inView) return;
     let frame = 0;
     const started = performance.now();
     const tick = (now: number) => {
       const t = Math.min(1, (now - started) / durationMs);
       // Ease-out cubic: fast off the line, settles gently on the real figure.
-      setShown(value * (1 - Math.pow(1 - t, 3)));
+      setCounted(value * (1 - Math.pow(1 - t, 3)));
       if (t < 1) frame = requestAnimationFrame(tick);
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [inView, value, durationMs, reduce]);
+
+  /*
+   * Derived during render rather than synced into state by an effect.
+   *
+   * The reduced-motion reader wants the real figure immediately, and writing
+   * it in an effect both costs a cascading render and lets the displayed copy
+   * fall out of step with the prop whenever `value` changes after mount.
+   */
+  const shown = reduce ? value : counted;
 
   return (
     <span ref={ref} className="num">

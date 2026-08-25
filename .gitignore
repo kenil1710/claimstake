@@ -19,3 +19,4 @@ HANDOVER.md
 test/.deployed.json
 test/node_modules/
 contracts/_u128_probe.py
+*.tsbuildinfo

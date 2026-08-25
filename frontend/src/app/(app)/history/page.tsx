@@ -43,7 +43,7 @@ export default function RecordPage() {
 
       <div style={{ display: "flex", gap: "0.6rem", marginBottom: "2rem", flexWrap: "wrap" }}>
         <input
-          className="field mono"
+          className="field num"
           value={lookup}
           onChange={(event) => setLookup(event.target.value)}
           placeholder={account ? `${account} (yours)` : "0x… look up any address"}
@@ -75,21 +75,21 @@ export default function RecordPage() {
               display: "grid",
               gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
               gap: "1px",
-              background: "var(--rule)",
-              border: "1.5px solid var(--ink)",
+              background: "var(--line)",
+              border: "1px solid var(--line)",
               marginBottom: "2.25rem",
             }}
           >
-            <div style={{ background: "var(--field-raised)", padding: "1rem 1.1rem" }}>
+            <div style={{ background: "var(--surface)", padding: "1rem 1.1rem" }}>
               <Stat label="Won" value={String(data.wins)} tone="var(--defender)" />
             </div>
-            <div style={{ background: "var(--field-raised)", padding: "1rem 1.1rem" }}>
+            <div style={{ background: "var(--surface)", padding: "1rem 1.1rem" }}>
               <Stat label="Lost" value={String(data.losses)} tone="var(--challenger)" />
             </div>
-            <div style={{ background: "var(--field-raised)", padding: "1rem 1.1rem" }}>
+            <div style={{ background: "var(--surface)", padding: "1rem 1.1rem" }}>
               <Stat label="Disputes" value={String(data.total)} />
             </div>
-            <div style={{ background: "var(--field-raised)", padding: "1rem 1.1rem" }}>
+            <div style={{ background: "var(--surface)", padding: "1rem 1.1rem" }}>
               <Stat
                 label="Net on settled"
                 value={`${netWei >= 0n ? "+" : ""}${formatGen(netWei)} GEN`}
@@ -98,7 +98,7 @@ export default function RecordPage() {
             </div>
           </section>
 
-          <p className="mono" style={{ fontSize: "0.78rem", color: "var(--ink-faint)", marginBottom: "1.5rem" }}>
+          <p className="num" style={{ fontSize: "0.78rem", color: "var(--text-faint)", marginBottom: "1.5rem" }}>
             {shortAddress(data.address, 10, 8)}
           </p>
 
@@ -112,8 +112,8 @@ export default function RecordPage() {
               }
               action={
                 sameAddress(subject, account) ? (
-                  <Link href="/new" className="btn">
-                    File a claim
+                  <Link href="/challenge" className="btn">
+                    File a challenge
                   </Link>
                 ) : undefined
               }

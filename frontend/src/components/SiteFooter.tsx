@@ -8,6 +8,15 @@ import { shortAddress } from "@/lib/format";
 const REPO = "https://github.com/kenil1710/claimstake";
 
 /**
+ * The project's X profile, or nothing.
+ *
+ * Left to configuration rather than written in, and the link is omitted
+ * entirely when it is unset: a footer that ships a guessed handle points the
+ * audience at whoever actually owns it, which is worse than having no link.
+ */
+const X_URL = process.env.NEXT_PUBLIC_X_URL ?? "";
+
+/**
  * The network line is derived from NETWORK_LABEL rather than written out.
  *
  * Hardcoding a network name into the footer is how a deployment ends up
@@ -64,6 +73,17 @@ export function SiteFooter() {
             >
               GitHub
             </a>
+            {X_URL ? (
+              <a
+                href={X_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="link"
+                style={{ fontSize: "0.85rem" }}
+              >
+                X
+              </a>
+            ) : null}
             <a
               href={explorerUrl("address", CONTRACT_ADDRESS)}
               target="_blank"

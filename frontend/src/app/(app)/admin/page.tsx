@@ -53,15 +53,15 @@ export default function AdminPage() {
           display: "grid",
           gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
           gap: "1px",
-          background: "var(--rule)",
-          border: "1.5px solid var(--ink)",
+          background: "var(--line)",
+          border: "1px solid var(--line)",
           marginBottom: "2.25rem",
         }}
       >
         {[
           { label: "Contract balance", value: `${formatGen(stats.balance)} GEN` },
           { label: "Staked and locked", value: `${formatGen(stats.locked_stakes)} GEN` },
-          { label: "Fees to withdraw", value: `${formatGen(stats.protocol_balance)} GEN`, tone: "var(--gold)" },
+          { label: "Fees to withdraw", value: `${formatGen(stats.protocol_balance)} GEN`, tone: "var(--text)" },
           { label: "Refunded to date", value: `${formatGen(stats.total_refunded)} GEN` },
           {
             label: "Unallocated",
@@ -69,15 +69,15 @@ export default function AdminPage() {
             tone: unallocated > 0n ? "var(--challenger)" : "var(--defender)",
           },
         ].map((item) => (
-          <div key={item.label} style={{ background: "var(--field-raised)", padding: "1rem 1.1rem" }}>
+          <div key={item.label} style={{ background: "var(--surface)", padding: "1rem 1.1rem" }}>
             <Stat label={item.label} value={item.value} tone={item.tone} />
           </div>
         ))}
       </section>
 
       <p
-        className="mono"
-        style={{ fontSize: "0.78rem", color: "var(--ink-faint)", marginBottom: "2rem" }}
+        className="num"
+        style={{ fontSize: "0.78rem", color: "var(--text-faint)", marginBottom: "2rem" }}
       >
         contract {shortAddress(CONTRACT_ADDRESS, 10, 8)} · owner {shortAddress(stats.owner, 10, 8)} ·{" "}
         {stats.paused ? "PAUSED" : "live"} · fee {formatBps(stats.protocol_fee_bps)}
@@ -89,7 +89,7 @@ export default function AdminPage() {
       {unallocated > 0n ? (
         <div
           style={{
-            border: "1.5px solid var(--challenger)",
+            border: "1px solid var(--challenger)",
             background: "var(--challenger-wash)",
             padding: "1rem 1.15rem",
             marginBottom: "2rem",
@@ -99,9 +99,10 @@ export default function AdminPage() {
             Unallocated value
           </h2>
           <p style={{ fontSize: "0.92rem", color: "var(--challenger)", maxWidth: "70ch" }}>
-            The contract holds {formatGen(stats.unallocated)} GEN it does not owe to any stake or fee.
-            Sweeping returns it. The contract refuses to sweep within an hour of its last payout, so a
-            transfer that has not finalised yet is never mistaken for a surplus.
+            The contract holds {formatGen(stats.unallocated)}{" "}
+            GEN it does not owe to any stake or fee. Sweeping returns it. The contract refuses to
+            sweep within an hour of its last payout, so a transfer that has not finalised yet is
+            never mistaken for a surplus.
           </p>
         </div>
       ) : null}
@@ -126,7 +127,7 @@ export default function AdminPage() {
               <h2 className="display" style={{ fontSize: "1.35rem", marginBottom: "0.3rem" }}>
                 {stats.paused ? "Resume the protocol" : "Pause the protocol"}
               </h2>
-              <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "0.88rem", color: "var(--text-dim)", marginBottom: "1rem" }}>
                 Pausing stops new filings and settlement. It never traps money: withdrawing a claim and
                 closing out an expired one both keep working while paused.
               </p>
@@ -148,11 +149,11 @@ export default function AdminPage() {
               <h2 className="display" style={{ fontSize: "1.35rem", marginBottom: "0.3rem" }}>
                 Withdraw fees
               </h2>
-              <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "0.88rem", color: "var(--text-dim)", marginBottom: "1rem" }}>
                 {formatGen(stats.protocol_balance)} GEN has accrued from settled disputes.
               </p>
               <input
-                className="field mono"
+                className="field num"
                 value={payoutTo}
                 onChange={(event) => setPayoutTo(event.target.value)}
                 placeholder={account}
@@ -177,7 +178,7 @@ export default function AdminPage() {
               <h2 className="display" style={{ fontSize: "1.35rem", marginBottom: "0.3rem" }}>
                 Sweep unallocated
               </h2>
-              <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "0.88rem", color: "var(--text-dim)", marginBottom: "1rem" }}>
                 Returns value the contract holds but owes nobody. Capped at the surplus, so it can never
                 reach a live stake or an unwithdrawn fee.
               </p>
@@ -199,7 +200,7 @@ export default function AdminPage() {
               <h2 className="display" style={{ fontSize: "1.35rem", marginBottom: "0.3rem" }}>
                 Parameters
               </h2>
-              <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", marginBottom: "1rem" }}>
+              <p style={{ fontSize: "0.88rem", color: "var(--text-dim)", marginBottom: "1rem" }}>
                 Blank fields keep their current value.
               </p>
               <div style={{ display: "grid", gap: "0.7rem" }}>
