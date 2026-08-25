@@ -256,6 +256,16 @@ export const submitCancel = (account: `0x${string}`, disputeId: number) =>
 export const submitExpire = (account: `0x${string}`, disputeId: number) =>
   send(account, "expire_dispute", [disputeId]);
 
+/**
+ * The guaranteed exit for an ACTIVE dispute consensus never settled.
+ *
+ * Permissionless and not gated on the pause switch, so neither the owner nor a
+ * stalled validator network can hold two committed stakes indefinitely. Returns
+ * both stakes in full and charges no fee.
+ */
+export const submitSettleStalled = (account: `0x${string}`, disputeId: number) =>
+  send(account, "settle_stalled", [disputeId]);
+
 export const submitSetPaused = (account: `0x${string}`, paused: boolean) =>
   send(account, "set_paused", [paused]);
 

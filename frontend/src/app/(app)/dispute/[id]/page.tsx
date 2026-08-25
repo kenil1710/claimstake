@@ -10,6 +10,7 @@ import {
   submitCancel,
   submitExpire,
   submitResolve,
+  submitSettleStalled,
 } from "@/lib/contract";
 import { useWallet } from "@/components/WalletProvider";
 import { useContractWrite } from "@/hooks/useContractWrite";
@@ -68,7 +69,22 @@ export default function DisputePage({ params }: { params: Promise<{ id: string }
   const canDefend = data.status === "OPEN" && !windowClosed && !isChallenger && !paused;
   const canCancel = data.status === "OPEN" && isChallenger;
   const canExpire = data.status === "OPEN" && windowClosed;
-  const canResolve = data.status === "ACTIVE" && !paused;
+  // Not gated on `paused`: the contract deliberately lets committed stakes
+  // settle while the protocol is paused, because pause stops new risk arriving
+  // and must never trap money already on the table.
+  const canResolve = data.status === "ACTIVE";
+
+  /**
+   * When the guaranteed exit opens.
+   *
+   * The contract counts the resolution window from the join deadline, so this
+   * mirrors it exactly rather than guessing from when the defender arrived.
+   * Past this point anyone may force the case closed as inconclusive and both
+   * stakes go home.
+   */
+  const forceCloseAt = data.join_deadline + (stats?.resolution_window ?? 0);
+  const canForceClose =
+    data.status === "ACTIVE" && Boolean(stats) && now > 0 && forceCloseAt * 1000 < now;
 
   return (
     <>
@@ -245,8 +261,41 @@ export default function DisputePage({ params }: { params: Promise<{ id: string }
             </button>
             {paused ? (
               <p style={{ marginTop: "0.7rem", fontSize: "0.85rem", color: "var(--text-dim)" }}>
-                Paused — settlement is on hold.
+                The protocol is paused, so no new stakes can be taken — but this pot can still be
+                settled. A pause never traps money already on the table.
               </p>
+            ) : null}
+
+            {canForceClose ? (
+              <div style={{ marginTop: "1.35rem", paddingTop: "1.2rem", borderTop: "1px solid var(--line)" }}>
+                <div className="eyebrow" style={{ marginBottom: "0.5rem" }}>
+                  The resolution window has passed
+                </div>
+                <p
+                  style={{
+                    color: "var(--text-dim)",
+                    fontSize: "0.9rem",
+                    marginBottom: "1rem",
+                    maxWidth: "62ch",
+                  }}
+                >
+                  Consensus has had its full window and has not settled this. Anyone can now close it
+                  out as inconclusive: both sides take back their exact stake and no fee is charged.
+                  This is the guaranteed exit — it does not need the owner, and it works while paused.
+                </p>
+                <button
+                  className="btn btn-ghost"
+                  disabled={!account || write.busy}
+                  onClick={() =>
+                    void write.run((from) => submitSettleStalled(from, data.id), {
+                      onAccepted: refresh,
+                      successMessage: `#${data.id} force-closed. Both stakes are on their way back.`,
+                    })
+                  }
+                >
+                  {write.busy ? "Working…" : "Force close and refund both sides"}
+                </button>
+              </div>
             ) : null}
           </div>
         ) : null}
@@ -278,8 +327,35 @@ export default function DisputePage({ params }: { params: Promise<{ id: string }
               </span>
             </div>
 
-            <p style={{ fontSize: "1rem", lineHeight: 1.68, maxWidth: "72ch", marginBottom: "1.5rem", color: "var(--text-dim)" }}>
+            <p style={{ fontSize: "1rem", lineHeight: 1.68, maxWidth: "72ch", marginBottom: "1rem", color: "var(--text-dim)" }}>
               {data.reasoning || "No reasoning was recorded."}
+            </p>
+
+            {/*
+              Says plainly which half of this record consensus actually stands
+              behind. The verdict is the compared axis — every validator ran the
+              judgement and had to reach the same one before the money moved.
+              The narrative around it is the leader's account, checked only for
+              not contradicting the verdict it carried. Presenting both in the
+              same voice would overstate what was verified.
+            */}
+            <p
+              style={{
+                fontSize: "0.8rem",
+                lineHeight: 1.6,
+                maxWidth: "72ch",
+                marginBottom: "1.5rem",
+                color: "var(--text-faint)",
+                borderLeft: "2px solid var(--line-bright)",
+                paddingLeft: "0.85rem",
+              }}
+            >
+              <strong style={{ color: "var(--text-dim)" }}>What consensus verified:</strong> the
+              verdict above, and with it the payout — every validator judged independently and had
+              to agree before a single wei moved.{" "}
+              <strong style={{ color: "var(--text-dim)" }}>What it did not:</strong> the wording of
+              the reasoning and the confidence figure are the lead validator&rsquo;s account, held
+              only to not contradicting the verdict. Weigh them as testimony, not as proof.
             </p>
 
             <div

@@ -794,7 +794,18 @@ class ClaimStake(gl.Contract):
 
 	@gl.public.write
 	def resolve_dispute(self, dispute_id: int) -> str:
-		self._require_live()
+		# Deliberately NOT gated on `paused`.
+		#
+		# Pause exists to stop new risk arriving — create_dispute and
+		# defend_dispute both check it. It must never trap money that is
+		# already committed: once both stakes are in, resolve is the ONLY exit
+		# an ACTIVE dispute has, so pausing with this guard in place froze every
+		# live pot for as long as the owner cared to leave it paused. The owner
+		# could not change a verdict, but could withhold every payout
+		# indefinitely, which is the same power by a slower route.
+		#
+		# cancel_dispute and expire_dispute already run while paused for exactly
+		# this reason; resolve was the inconsistency, not they.
 		now = self._now()
 		did = u32(int(dispute_id))
 		record = self._get(dispute_id)
@@ -942,6 +953,73 @@ class ClaimStake(gl.Contract):
 		self.locked_stakes = u128(int(self.locked_stakes) - refund)
 		self._pay(Address(str(record.challenger)), refund)
 		return STATUS_EXPIRED
+
+	@gl.public.write
+	def settle_stalled(self, dispute_id: int) -> str:
+		"""Return both stakes on an ACTIVE dispute consensus never settled.
+
+		resolve_dispute is the normal exit, and it needs the validators to
+		agree. Usually they do. But nothing in a non-deterministic system
+		guarantees they ever will — a claim page that is permanently gone, a
+		reading the models cannot stabilise on, a network that cannot form a
+		round — and with resolve as the only way out, those two stakes would sit
+		locked with no path to their owners at all.
+
+		So once resolution_window has elapsed, ANYONE may close the case as
+		INCONCLUSIVE. Each side takes back its own stake, no fee is charged, and
+		nobody wins: exactly the settlement an INCONCLUSIVE verdict produces,
+		reached by the clock instead of by consensus.
+
+		Permissionless on purpose. A refund path only the owner can trigger is
+		not a guarantee, it is a promise — and it hands the owner the power to
+		withhold that resolve_dispute was just freed from. Not gated on `paused`
+		for the same reason.
+		"""
+		record = self._get(dispute_id)
+		now = self._now()
+		if str(record.status) != STATUS_ACTIVE:
+			raise gl.vm.UserError(
+				"Only an ACTIVE dispute can be force-closed; this one is " + str(record.status)
+			)
+		# Measured from the join deadline, not from whenever the defender
+		# actually arrived. The deadline is already in storage and is always at
+		# or after the moment the dispute went ACTIVE, so using it can only make
+		# this wait longer — never shorter than the window promises.
+		ready = int(record.join_deadline) + int(self.resolution_window)
+		if now <= ready:
+			raise gl.vm.UserError(
+				"Consensus has " + str(ready - now) + "s left to settle this before it can be force-closed"
+			)
+
+		challenger = Address(str(record.challenger))
+		defender = Address(str(record.defender))
+		challenger_stake = int(record.challenger_stake)
+		defender_stake = int(record.defender_stake)
+		pot = challenger_stake + defender_stake
+
+		record.status = STATUS_RESOLVED
+		record.verdict = VERDICT_INCONCLUSIVE
+		record.winner = Address(ZERO_ADDRESS)
+		record.reasoning = (
+			"Force-closed by the resolution window: consensus did not settle this dispute in time. "
+			"No fee was taken and both stakes were returned in full."
+		)
+		record.confidence = u32(0)
+		record.pot = u128(pot)
+		record.fee = u128(0)
+		record.payout = u128(0)
+		record.resolved_epoch = u64(now)
+
+		self.count_resolved = u32(int(self.count_resolved) + 1)
+		self.count_inconclusive = u32(int(self.count_inconclusive) + 1)
+		self.total_paid = u128(int(self.total_paid) + pot)
+		self.locked_stakes = u128(int(self.locked_stakes) - pot)
+
+		# Each side gets its own stake back verbatim — no fee, no division, and
+		# the two refunds sum to exactly the pot.
+		self._pay(challenger, challenger_stake)
+		self._pay(defender, defender_stake)
+		return VERDICT_INCONCLUSIVE
 
 	# ── Owner ───────────────────────────────────────────────────────────────
 
