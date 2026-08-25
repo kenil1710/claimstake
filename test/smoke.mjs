@@ -22,7 +22,7 @@ const networkName = argOf("network", deployed.network);
 
 const GEN = 10n ** 18n;
 const STAKE = GEN / 100n; // 0.01 GEN — the contract's minimum
-const GIST = "https://gist.githubusercontent.com/kenil1710/e8adc0c6e3ce687b5590b096e23536e1/raw";
+const CLAIM_URL = "https://en.wikipedia.org/wiki/Eiffel_Tower";
 
 const challenger = connect({ networkName, address, role: "challenger1" });
 const defender = connect({ networkName, address, role: "defender1" });
@@ -61,18 +61,34 @@ const defenderBefore = await balanceOf(defender.account.address);
 console.log("── 1. create a FALSE claim");
 const created = await challenger.send(
   "create_dispute",
-  ["The Eiffel Tower is located in London, England.", `${GIST}/eiffel.html`, "", 5],
+  ["The Eiffel Tower is located in London, England.", CLAIM_URL, "", 5],
   STAKE,
 );
 if (!created.settled) {
-  bad("create settled", created.reason ?? "unsettled");
+  bad("create settled", `${created.failure ?? "unsettled"}${created.hash ? ` — tx ${created.hash}` : ""}`);
   process.exit(1);
 }
+/*
+ * Acceptance is read off contract STATE, never off the return value.
+ * Bradbury does not populate `consensus_data`, so `returnedJson` is null there
+ * for every call — asserting on it marks a successful create as a failure. The
+ * dispute count moving is the signal that works on both networks; the return
+ * body is only ever a nicer reason string when the transport carries one.
+ */
+const afterCreate = await viewJson("get_stats");
+const createdOk = Number(afterCreate.total) > Number(before.total);
+const createRefund = BigInt(afterCreate.total_refunded) - BigInt(before.total_refunded);
 const createdJson = returnedJson(created);
-check("create accepted and returned ok:true", createdJson?.ok === true, JSON.stringify(createdJson));
-const id = Number(createdJson?.id ?? -1);
+check(
+  "create accepted (dispute count advanced)",
+  createdOk,
+  createdOk
+    ? `${before.total} -> ${afterCreate.total}`
+    : `rejected: "${createdJson?.reason ?? "(reason not readable on this network)"}" — refunded ${gen(createRefund)}`,
+);
+const id = createdOk ? Number(afterCreate.total) - 1 : -1;
 if (id < 0) {
-  bad("dispute id returned");
+  bad("dispute id derived from state");
   process.exit(1);
 }
 ok(`dispute #${id} opened`, `tx ${created.hash?.slice(0, 12)}…`);
@@ -84,19 +100,33 @@ check("challenger stake recorded", BigInt(d.challenger_stake) === STAKE, gen(d.c
 
 // ── 2. Self-defence must be refused ─────────────────────────────────────────
 console.log("\n── 2. challenger may not defend their own case");
+const beforeSelf = await viewJson("get_stats");
 const selfDefend = await challenger.send("defend_dispute", [id, ""], STAKE);
+const afterSelf = await viewJson("get_stats");
+const selfRefund = BigInt(afterSelf.total_refunded) - BigInt(beforeSelf.total_refunded);
+const selfDispute = await viewJson("get_dispute", [id]);
 const selfJson = returnedJson(selfDefend);
+// The refund is the proof it took the _reject path rather than reverting: a
+// revert would strand the value instead of returning it, and would leave
+// total_refunded flat. The seat must also still be empty.
 check(
   "self-defence rejected AND refunded (not reverted)",
-  selfDefend.settled && selfJson?.ok === false && BigInt(selfJson?.refunded ?? 0) === STAKE,
-  selfJson ? `${selfJson.reason} — refunded ${gen(selfJson.refunded ?? 0)}` : "no json",
+  selfDefend.settled && selfRefund === STAKE && selfDispute.status === "OPEN",
+  `refunded ${gen(selfRefund)}, still ${selfDispute.status}${selfJson ? ` — "${selfJson.reason}"` : ""}`,
 );
 
 // ── 3. Defend ───────────────────────────────────────────────────────────────
 console.log("\n── 3. defender matches the stake");
 const defended = await defender.send("defend_dispute", [id, ""], STAKE);
-const defendedJson = returnedJson(defended);
-check("defend accepted", defended.settled && defendedJson?.ok === true, JSON.stringify(defendedJson));
+// Same rule as create: the seat being taken is contract state, not a receipt.
+const seated = await viewJson("get_dispute", [id]);
+check(
+  "defend accepted",
+  defended.settled &&
+    seated.status === "ACTIVE" &&
+    String(seated.defender).toLowerCase() === defender.account.address.toLowerCase(),
+  `${seated.status}, defender ${String(seated.defender).slice(0, 10)}…`,
+);
 
 d = await viewJson("get_dispute", [id]);
 check("status is ACTIVE", d.status === "ACTIVE", d.status);
@@ -115,7 +145,7 @@ check(
 console.log("\n── 5. send it to the validators (this takes a minute)");
 const resolved = await defender.send("resolve_dispute", [id]);
 if (!resolved.settled) {
-  bad("resolve settled", resolved.reason ?? "unsettled");
+  bad("resolve settled", `${resolved.failure ?? "unsettled"}${resolved.hash ? ` — tx ${resolved.hash}` : ""}`);
 } else {
   ok("resolve settled", `${resolved.seconds?.toFixed(0)}s, tx ${resolved.hash?.slice(0, 12)}…`);
 }
